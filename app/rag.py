@@ -1,3 +1,4 @@
+# app/rag.py
 import os
 import json
 import requests
@@ -11,7 +12,7 @@ load_dotenv()
 
 CHROMA_DIR = "db"
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemma-3-4b-it:free")
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "deepseek/deepseek-chat")
 
 def get_collection():
     """Получить ChromaDB коллекцию (новый API)"""
@@ -38,33 +39,40 @@ def retrieve_context(query: str, top_k: int = 5) -> List[Dict]:
             {
                 "text": d,
                 "meta": m,
-                "distance": dist
+                "distance": dist,
+                "source_id": f"[{i+1}]"  # Нужно для ссылок в тексте
             }
-            for d, m, dist in zip(docs, metas, distances)
+            for i, (d, m, dist) in enumerate(zip(docs, metas, distances))
         ]
     except Exception as e:
         print(f"❌ Ошибка при поиске: {e}")
         return []
 
 def build_prompt(question: str, contexts: list) -> str:
-    """Собрать промпт с контекстом"""
+    """Собрать промпт с контекстом и инструкциями по цитированию"""
+    
+    # Форматировать контекст с числовыми ссылками
     parts = []
     for i, c in enumerate(contexts, 1):
         src = c["meta"].get("source", "unknown")
-        parts.append(f"[Источник {i}: {src}]\n{c['text']}\n")
+        parts.append(f"[{i}] ({src}):\n{c['text']}\n")
     
     context_block = "\n\n".join(parts) if parts else "Контекст не найден"
     
     return (
         "Ты — эксперт по химическим методам увеличения нефтеотдачи (ХМУН). "
-        "Отвечай строго по приведённым источникам, ссылайся на них в тексте. "
+        "Отвечай строго по приведённым источникам.\n\n"
+        "ВАЖНО: Когда ты используешь информацию из источника, "
+        "ОБЯЗАТЕЛЬНО указывай номер источника в формате [N] сразу после предложения или фразы. "
+        "Например: 'Температура воды составляет 40–80°C [1]' или 'По данным исследования [2], эффективность...'.\n\n"
         "Если информация в источниках отсутствует, скажи это честно.\n\n"
-        f"Контекст:\n{context_block}\n\n"
-        f"Вопрос пользователя: {question}\n\n"
-        "Сформулируй чёткий, структурированный ответ на русском языке."
+        "ИСТОЧНИКИ:\n"
+        f"{context_block}\n\n"
+        f"ВОПРОС: {question}\n\n"
+        "Ответь, не забывая про ссылки [1], [2] и т.д. на источники."
     )
 
-def ask_llm(question: str, top_k: int = 5) -> dict:
+def ask_llm(question: str, top_k: int = 100) -> dict:
     """Получить ответ от LLM через OpenRouter"""
     
     # Поиск контекста
@@ -110,13 +118,15 @@ def ask_llm(question: str, top_k: int = 5) -> dict:
     except Exception as e:
         answer = f"❌ Ошибка при вызове LLM: {str(e)[:200]}"
     
-    # Подготовка источников
+    # Подготовка источников с индексами
     sources = [
         {
+            "index": i + 1,
             "preview": shorten(c["text"], 200),
             "meta": c["meta"],
+            "source_file": c["meta"].get("source", "unknown")
         }
-        for c in contexts
+        for i, c in enumerate(contexts)
     ]
     
     return {"answer": answer, "sources": sources}
