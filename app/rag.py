@@ -12,7 +12,7 @@ load_dotenv()
 
 CHROMA_DIR = "db"
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "deepseek/deepseek-chat")
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemma-3-4b-it:free")
 
 def get_collection():
     """Получить ChromaDB коллекцию (новый API)"""
